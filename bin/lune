@@ -1,0 +1,21 @@
+#!/bin/bash
+# Lune - LuaJIT interpreter and package manager
+# Bootstrap entry point - calls LuaJIT with the real main.lua
+
+set -e
+
+# Find the directory where this script lives
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LUNE_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Use homebrew LuaJIT or fall back to PATH
+if [ -x "/opt/homebrew/bin/luajit" ]; then
+    LUAJIT="/opt/homebrew/bin/luajit"
+elif command -v luajit &> /dev/null; then
+    LUAJIT="luajit"
+else
+    echo "Error: LuaJIT not found. Install with: brew install luajit" >&2
+    exit 1
+fi
+
+exec "$LUAJIT" "$LUNE_ROOT/src/main.lua" "$@"
