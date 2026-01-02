@@ -22,5 +22,17 @@ all: lunert
 lunert: lunert.c
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
+# Build self-contained lune binary
+# This bundles lune's own source code into the runtime
+lune: lunert
+	@echo "Creating lune source bundle..."
+	@rm -f lune-src.zip
+	@cd .. && zip -r -0 runtime/lune-src.zip src/ vendor/ -x "*.swp" -x "*~"
+	@echo "Fusing runtime with source bundle..."
+	@cat lunert lune-src.zip > lune
+	@chmod +x lune
+	@rm -f lune-src.zip
+	@echo "Created: lune ($$(du -h lune | cut -f1))"
+
 clean:
-	rm -f lunert
+	rm -f lunert lune lune-src.zip

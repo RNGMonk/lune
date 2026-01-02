@@ -60,8 +60,52 @@ static int is_fused(const char* exe_path) {
     return 0;
 }
 
-/* Bootstrap Lua code for fused mode */
-static const char FUSED_BOOTSTRAP[] =
+/* Check if a file exists in the fused ZIP */
+static int has_file_in_zip(const char* exe_path, const char* filename) {
+    FILE* f = fopen(exe_path, "rb");
+    if (!f) return 0;
+
+    /* Read entire file to search for ZIP entries */
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    /* Allocate buffer - for CLI detection we just need to scan */
+    unsigned char* buf = malloc(file_size);
+    if (!buf) {
+        fclose(f);
+        return 0;
+    }
+
+    size_t len = fread(buf, 1, file_size, f);
+    fclose(f);
+
+    size_t filename_len = strlen(filename);
+    int found = 0;
+
+    /* Scan for local file headers */
+    for (size_t i = 0; i + 30 + filename_len <= len; i++) {
+        /* Local file header signature: PK\x03\x04 */
+        if (buf[i] == 0x50 && buf[i+1] == 0x4B &&
+            buf[i+2] == 0x03 && buf[i+3] == 0x04) {
+            /* Name length at offset 26 (2 bytes, little endian) */
+            unsigned int name_len = buf[i+26] | (buf[i+27] << 8);
+            if (name_len == filename_len) {
+                /* Compare filename at offset 30 */
+                if (memcmp(buf + i + 30, filename, filename_len) == 0) {
+                    found = 1;
+                    break;
+                }
+            }
+        }
+    }
+
+    free(buf);
+    return found;
+}
+
+/* Common ZIP reader code shared by both bootstrap modes */
+static const char ZIP_READER[] =
 "local exe_path = _LUNERT_EXE_PATH\n"
 "local f = assert(io.open(exe_path, 'rb'))\n"
 "local content = f:read('*a')\n"
@@ -87,8 +131,15 @@ static const char FUSED_BOOTSTRAP[] =
 "        end\n"
 "    end\n"
 "end\n"
+"_G._LUNE_FIND_FILE = find_file\n"
+"_G._LUNE_CONTENT = content\n";
+
+/* Bootstrap for fused app mode (compiled applications) */
+static const char FUSED_APP_BOOTSTRAP[] =
+"local find_file = _G._LUNE_FIND_FILE\n"
+"local content = _G._LUNE_CONTENT\n"
 "\n"
-"-- Custom module loader\n"
+"-- Custom module loader for apps\n"
 "table.insert(package.loaders, 2, function(mod)\n"
 "    local mod_path = mod:gsub('%.', '/')\n"
 "    local paths = {\n"
@@ -107,6 +158,34 @@ static const char FUSED_BOOTSTRAP[] =
 "local main = find_file(content, 'main.lua')\n"
 "if not main then error('No main.lua in bundle') end\n"
 "assert(loadstring(main, '@main.lua'))()\n";
+
+/* Bootstrap for fused CLI mode (lune itself) */
+static const char FUSED_CLI_BOOTSTRAP[] =
+"local find_file = _G._LUNE_FIND_FILE\n"
+"local content = _G._LUNE_CONTENT\n"
+"\n"
+"-- Mark as embedded mode\n"
+"_G.LUNE_EMBEDDED = true\n"
+"\n"
+"-- Custom module loader for CLI\n"
+"table.insert(package.loaders, 2, function(mod)\n"
+"    local mod_path = mod:gsub('%.', '/')\n"
+"    local paths = {\n"
+"        'src/' .. mod_path .. '.lua',\n"
+"        'src/' .. mod_path .. '/init.lua',\n"
+"        'vendor/' .. mod_path .. '.lua',\n"
+"        'vendor/' .. mod_path .. '/init.lua',\n"
+"    }\n"
+"    for _, p in ipairs(paths) do\n"
+"        local src = find_file(content, p)\n"
+"        if src then return assert(loadstring(src, '@'..p)) end\n"
+"    end\n"
+"end)\n"
+"\n"
+"-- Run CLI\n"
+"local cli = require('cli')\n"
+"local exit_code = cli.run(arg)\n"
+"os.exit(exit_code or 0)\n";
 
 /* Bootstrap for interpreter mode */
 static const char INTERP_BOOTSTRAP[] =
@@ -142,6 +221,12 @@ int main(int argc, char** argv) {
     /* Get exe path and check fused mode */
     const char* exe_path = get_executable_path();
     int fused = exe_path ? is_fused(exe_path) : 0;
+    int is_cli = 0;
+
+    if (fused && exe_path) {
+        /* Check if this is the CLI (has src/cli/init.lua) or an app (has main.lua) */
+        is_cli = has_file_in_zip(exe_path, "src/cli/init.lua");
+    }
 
     if (exe_path) {
         lua_pushstring(L, exe_path);
@@ -149,13 +234,30 @@ int main(int argc, char** argv) {
     }
     lua_pushboolean(L, fused);
     lua_setglobal(L, "_LUNERT_IS_FUSED");
+    lua_pushboolean(L, is_cli);
+    lua_setglobal(L, "_LUNERT_IS_CLI");
 
     /* Run bootstrap */
-    const char* code = fused ? FUSED_BOOTSTRAP : INTERP_BOOTSTRAP;
-    if (luaL_dostring(L, code) != 0) {
-        fprintf(stderr, "Error: %s\n", lua_tostring(L, -1));
-        lua_close(L);
-        return 1;
+    if (fused) {
+        /* First run ZIP reader to set up find_file and content */
+        if (luaL_dostring(L, ZIP_READER) != 0) {
+            fprintf(stderr, "Error: %s\n", lua_tostring(L, -1));
+            lua_close(L);
+            return 1;
+        }
+        /* Then run appropriate bootstrap */
+        const char* bootstrap = is_cli ? FUSED_CLI_BOOTSTRAP : FUSED_APP_BOOTSTRAP;
+        if (luaL_dostring(L, bootstrap) != 0) {
+            fprintf(stderr, "Error: %s\n", lua_tostring(L, -1));
+            lua_close(L);
+            return 1;
+        }
+    } else {
+        if (luaL_dostring(L, INTERP_BOOTSTRAP) != 0) {
+            fprintf(stderr, "Error: %s\n", lua_tostring(L, -1));
+            lua_close(L);
+            return 1;
+        }
     }
 
     lua_close(L);
