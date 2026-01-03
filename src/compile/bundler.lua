@@ -153,6 +153,32 @@ function M.collect_lua_files(dir, prefix)
     return files
 end
 
+--- Collect native libraries (.so, .dylib) from lua_deps
+function M.collect_native_libs(lua_deps_dir)
+    local libs = {}
+    local lib_dir = paths.join(lua_deps_dir, "lib/lua/5.1")
+
+    if not fs.exists(lib_dir) then
+        return libs
+    end
+
+    for root, dirs, filenames in fs.walk(lib_dir) do
+        for _, filename in ipairs(filenames) do
+            if filename:match("%.so$") or filename:match("%.dylib$") then
+                local full_path = paths.join(root, filename)
+                -- Get relative path from lib_dir
+                local rel_path = full_path:sub(#lib_dir + 2)
+                table.insert(libs, {
+                    path = full_path,
+                    name = rel_path,
+                })
+            end
+        end
+    end
+
+    return libs
+end
+
 --- Bundle a Lua project into a ZIP
 function M.bundle(entry_point, options)
     options = options or {}
@@ -193,9 +219,12 @@ function M.bundle(entry_point, options)
         end
     end
 
+    -- Collect native libraries
+    local native_libs = M.collect_native_libs(lua_deps)
+
     -- Create ZIP
     local zip_data = M.create_zip(files)
-    return zip_data
+    return zip_data, native_libs
 end
 
 return M

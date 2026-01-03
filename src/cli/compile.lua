@@ -48,9 +48,9 @@ function M.execute(args)
     print("Bundling " .. input .. "...")
 
     -- Create ZIP bundle
-    local zip_data, err = bundler.bundle(input)
+    local zip_data, native_libs = bundler.bundle(input)
     if not zip_data then
-        io.stderr:write("Error bundling: " .. tostring(err) .. "\n")
+        io.stderr:write("Error bundling: " .. tostring(native_libs) .. "\n")
         return 1
     end
 
@@ -61,6 +61,27 @@ function M.execute(args)
     if not ok then
         io.stderr:write("Error: " .. tostring(fuse_err) .. "\n")
         return 1
+    end
+
+    -- Copy native libraries next to executable
+    if native_libs and #native_libs > 0 then
+        local output_dir = paths.dirname(output)
+        if output_dir == "" then
+            output_dir = "."
+        end
+        local lib_dir = paths.join(output_dir, "lib")
+
+        print("Copying " .. #native_libs .. " native library(ies)...")
+
+        for _, lib in ipairs(native_libs) do
+            local dest = paths.join(lib_dir, lib.name)
+            fs.mkdir_p(paths.dirname(dest))
+            local copy_ok, copy_err = fs.copy_file(lib.path, dest)
+            if not copy_ok then
+                io.stderr:write("Error copying " .. lib.name .. ": " .. tostring(copy_err) .. "\n")
+                return 1
+            end
+        end
     end
 
     -- Get file size

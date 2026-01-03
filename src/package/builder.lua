@@ -5,6 +5,38 @@ local M = {}
 
 local fs = require("core.fs")
 local paths = require("core.paths")
+local ffi = require("ffi")
+
+--- Detect LuaJIT include and library paths
+local function get_luajit_paths()
+    local is_macos = ffi.os == "OSX"
+
+    local search_paths = {}
+
+    if is_macos then
+        -- Homebrew Apple Silicon
+        table.insert(search_paths, {inc = "/opt/homebrew/include/luajit-2.1", lib = "/opt/homebrew/lib"})
+        -- Homebrew Intel Mac
+        table.insert(search_paths, {inc = "/usr/local/include/luajit-2.1", lib = "/usr/local/lib"})
+    else
+        -- Linux standard paths
+        table.insert(search_paths, {inc = "/usr/include/luajit-2.1", lib = "/usr/lib"})
+        table.insert(search_paths, {inc = "/usr/local/include/luajit-2.1", lib = "/usr/local/lib"})
+        table.insert(search_paths, {inc = "/usr/include/luajit-2.0", lib = "/usr/lib/x86_64-linux-gnu"})
+    end
+
+    -- Find first path where lua.h exists
+    for _, p in ipairs(search_paths) do
+        local lua_h = p.inc .. "/lua.h"
+        local f = io.open(lua_h, "r")
+        if f then
+            f:close()
+            return p.inc, p.lib
+        end
+    end
+
+    return nil, nil
+end
 
 --- Install a builtin-type package
 -- This is the most common type - just copy Lua files
@@ -88,6 +120,13 @@ end
 --- Install a C module (compile from source)
 function M.install_c_module(modname, sources, source_dir, lib_dir, options)
     options = options or {}
+    local is_macos = ffi.os == "OSX"
+
+    -- Detect LuaJIT paths
+    local lua_inc, lua_lib = get_luajit_paths()
+    if not lua_inc then
+        return false, "Cannot find LuaJIT headers. Please install LuaJIT development files."
+    end
 
     -- Convert module name to output path
     local mod_path = modname:gsub("%.", "/")
@@ -103,7 +142,7 @@ function M.install_c_module(modname, sources, source_dir, lib_dir, options)
     end
 
     -- Build include directories
-    local incdirs = {"-I/opt/homebrew/include/luajit-2.1"}
+    local incdirs = {"-I" .. lua_inc}
     if options.incdirs then
         for _, dir in ipairs(options.incdirs) do
             table.insert(incdirs, "-I" .. paths.join(source_dir, dir))
@@ -112,6 +151,9 @@ function M.install_c_module(modname, sources, source_dir, lib_dir, options)
 
     -- Build library directories
     local libdirs = {}
+    if lua_lib then
+        table.insert(libdirs, "-L" .. lua_lib)
+    end
     if options.libdirs then
         for _, dir in ipairs(options.libdirs) do
             table.insert(libdirs, "-L" .. paths.join(source_dir, dir))
@@ -126,9 +168,17 @@ function M.install_c_module(modname, sources, source_dir, lib_dir, options)
         end
     end
 
+    -- Platform-specific flags
+    local platform_flags = ""
+    if is_macos then
+        -- macOS: allow undefined symbols (resolved at runtime by LuaJIT)
+        platform_flags = "-undefined dynamic_lookup"
+    end
+
     -- Compile command
     local cmd = string.format(
-        "cc -shared -fPIC -O2 %s %s %s %s -o %s 2>&1",
+        "cc -shared -fPIC -O2 %s %s %s %s %s -o %s 2>&1",
+        platform_flags,
         table.concat(incdirs, " "),
         table.concat(src_files, " "),
         table.concat(libdirs, " "),
@@ -138,10 +188,13 @@ function M.install_c_module(modname, sources, source_dir, lib_dir, options)
 
     local handle = io.popen(cmd)
     local compile_output = handle:read("*a")
-    local success = handle:close()
+    handle:close()
 
-    if not success then
-        return false, "Compilation failed:\n" .. cmd .. "\n" .. compile_output
+    -- Validate compilation succeeded by checking output file exists
+    if not fs.exists(output) then
+        return false, "Compilation failed for " .. modname .. ":\n" ..
+               "Command: " .. cmd .. "\n" ..
+               "Output:\n" .. compile_output
     end
 
     return true
@@ -201,11 +254,17 @@ function M.build_make(spec, source_dir, install_dir)
         make_cmd = make_cmd .. " " .. build.build_target
     end
 
+    -- Detect LuaJIT paths
+    local lua_inc, lua_lib = get_luajit_paths()
+    if not lua_inc then
+        return false, "Cannot find LuaJIT headers. Please install LuaJIT development files."
+    end
+
     -- Add variables
     local vars = {
         "PREFIX=" .. install_dir,
-        "LUA_INCDIR=/opt/homebrew/include/luajit-2.1",
-        "LUA_LIBDIR=/opt/homebrew/lib",
+        "LUA_INCDIR=" .. lua_inc,
+        "LUA_LIBDIR=" .. (lua_lib or ""),
         "LUA_DIR=" .. lua_dir,
         "INST_LIBDIR=" .. lib_dir,
         "INST_LUADIR=" .. lua_dir,
