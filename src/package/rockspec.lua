@@ -159,4 +159,101 @@ build = {
 ]], name, version .. "-1", name)
 end
 
+--- Find the project's rockspec file
+function M.find_rockspec()
+    local fs = require("core.fs")
+    local paths = require("core.paths")
+
+    local root = paths.find_project_root()
+    local entries = fs.listdir(root)
+
+    if entries then
+        for _, entry in ipairs(entries) do
+            if entry:match("%.rockspec$") then
+                return paths.join(root, entry)
+            end
+        end
+    end
+
+    return nil
+end
+
+--- Check if a dependency already exists in the rockspec
+function M.has_dependency(content, package_name)
+    -- Look for the package name in the dependencies section
+    local deps_section = content:match("dependencies%s*=%s*{([^}]*)}")
+    if not deps_section then
+        return false
+    end
+
+    -- Check if package name appears as a dependency
+    -- Match patterns like: "package", "package >= 1.0", etc.
+    local pattern = '["\']' .. package_name:gsub("%-", "%%-") .. '%s*["\'><=]'
+    if deps_section:match(pattern) then
+        return true
+    end
+
+    -- Check for exact match with quotes
+    pattern = '["\']' .. package_name:gsub("%-", "%%-") .. '["\']'
+    return deps_section:match(pattern) ~= nil
+end
+
+--- Add a dependency to a rockspec file
+function M.add_dependency(rockspec_path, package_name, version)
+    local fs = require("core.fs")
+
+    local content, err = fs.read_file(rockspec_path)
+    if not content then
+        return false, "Cannot read rockspec: " .. tostring(err)
+    end
+
+    -- Check if already present
+    if M.has_dependency(content, package_name) then
+        return true, "already present"
+    end
+
+    -- Build the dependency string
+    local dep_str
+    if version then
+        -- Strip the rockspec revision (e.g., "1.0.0-1" -> "1.0.0")
+        local base_version = version:gsub("%-.*", "")
+        dep_str = string.format('    "%s >= %s"', package_name, base_version)
+    else
+        dep_str = string.format('    "%s"', package_name)
+    end
+
+    -- Find the dependencies section and add the new dependency
+    local new_content = content:gsub(
+        "(dependencies%s*=%s*{)([^}]*)(})",
+        function(open, deps, close)
+            -- Check if deps section is empty or has content
+            local trimmed = deps:gsub("^%s*", ""):gsub("%s*$", "")
+            if trimmed == "" then
+                -- Empty dependencies, just add the new one
+                return open .. "\n" .. dep_str .. "\n" .. close
+            else
+                -- Has existing deps, add after last one
+                -- Remove trailing whitespace/newlines before the closing brace
+                local cleaned = deps:gsub("%s*$", "")
+                -- Check if last non-empty line has a comma
+                if not cleaned:match(",%s*$") then
+                    cleaned = cleaned .. ","
+                end
+                return open .. cleaned .. "\n" .. dep_str .. "\n" .. close
+            end
+        end
+    )
+
+    if new_content == content then
+        return false, "Could not find dependencies section in rockspec"
+    end
+
+    local ok, write_err = fs.write_file(rockspec_path, new_content)
+    if not ok then
+        return false, "Cannot write rockspec: " .. tostring(write_err)
+    end
+
+    return true
+end
+
 return M

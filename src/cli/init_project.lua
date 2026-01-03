@@ -61,8 +61,8 @@ lua_deps/
 function M.execute(args)
     local name = args[1]
 
-    -- If no name provided, use current directory name
-    if not name then
+    -- If no name provided or ".", use current directory name
+    if not name or name == "." then
         local cwd = fs.cwd()
         name = paths.basename(cwd)
     end

@@ -25,7 +25,8 @@ Lune - LuaJIT Interpreter and Package Manager
 Usage:
     lune <script.lua> [args...]     Run a Lua script
     lune run <script.lua> [args...] Run a Lua script (explicit)
-    lune install <package>          Install a package to ./lua_deps
+    lune install                    Install dependencies from rockspec
+    lune install <package> [--save] Install a package to ./lua_deps
     lune compile <script> -o <out>  Compile to standalone executable
     lune init [name]                Initialize a new project
 
@@ -35,7 +36,8 @@ Options:
 
 Examples:
     lune main.lua                   Run main.lua
-    lune install lua-socket         Install lua-socket package
+    lune install                    Install all rockspec dependencies
+    lune install argparse --save    Install and add to rockspec
     lune compile main.lua -o app    Create standalone executable
 ]])
     return 0
