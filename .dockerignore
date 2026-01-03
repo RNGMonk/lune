@@ -1,0 +1,13 @@
+# Exclude macOS-compiled binaries (need to build fresh for Linux)
+runtime/lunert
+runtime/lune
+runtime/lune-src.zip
+
+# Exclude local dependencies
+lua_deps/
+
+# Exclude editor/IDE files
+.claude
+*.swp
+*~
+.DS_Store
