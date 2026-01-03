@@ -17,7 +17,7 @@ endif
 
 PREFIX ?= /usr/local
 
-.PHONY: all clean lune install uninstall
+.PHONY: all clean lune install uninstall test test-compiled test-all
 
 all: lune
 
@@ -48,3 +48,19 @@ uninstall:
 
 clean:
 	rm -f runtime/lunert runtime/lune runtime/lune-src.zip
+
+# Run tests with uncompiled lune (bin/lune)
+test:
+	@./tests/run_tests.sh
+
+# Run tests with compiled lune (runtime/lune)
+test-compiled: lune
+	@./tests/run_tests.sh --compiled
+
+# Run all tests (both modes)
+test-all: lune
+	@echo "Running tests with uncompiled lune..."
+	@./tests/run_tests.sh
+	@echo ""
+	@echo "Running tests with compiled lune..."
+	@./tests/run_tests.sh --compiled

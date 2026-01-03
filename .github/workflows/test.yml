@@ -1,0 +1,66 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        mode: [uncompiled, compiled]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install LuaJIT (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y luajit libluajit-5.1-dev zip
+
+      - name: Install LuaJIT (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install luajit
+
+      - name: Set LUAJIT_DIR for Linux
+        if: runner.os == 'Linux'
+        run: echo "LUAJIT_DIR=/usr" >> $GITHUB_ENV
+
+      - name: Build compiled lune
+        if: matrix.mode == 'compiled'
+        run: make
+
+      - name: Verify lune works
+        run: |
+          if [ "${{ matrix.mode }}" = "compiled" ]; then
+            ./runtime/lune --version
+          else
+            ./bin/lune --version
+          fi
+
+      - name: Run integration tests
+        run: |
+          chmod +x tests/*.sh
+          if [ "${{ matrix.mode }}" = "compiled" ]; then
+            ./tests/run_tests.sh --compiled
+          else
+            ./tests/run_tests.sh
+          fi
+
+      - name: Upload test artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-artifacts-${{ matrix.os }}-${{ matrix.mode }}
+          path: |
+            tests/
+            runtime/
