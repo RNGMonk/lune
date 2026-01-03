@@ -4,31 +4,58 @@
 local ffi = require("ffi")
 local M = {}
 
+-- Detect platform
+local is_macos = (ffi.os == "OSX")
+
 -- FFI declarations for POSIX filesystem operations
-ffi.cdef[[
-    typedef unsigned int mode_t;
-
-    typedef struct DIR DIR;
-    struct dirent {
-        unsigned long long d_ino;
-        unsigned long long d_seekoff;
-        unsigned short d_reclen;
-        unsigned short d_namlen;
-        unsigned char  d_type;
-        char           d_name[1024];
-    };
-
-    DIR *opendir(const char *name);
-    struct dirent *readdir(DIR *dirp);
-    int closedir(DIR *dirp);
-    int mkdir(const char *path, mode_t mode);
-    int access(const char *path, int mode);
-    char *getcwd(char *buf, size_t size);
-    int unlink(const char *path);
-    int rmdir(const char *path);
-    int rename(const char *oldpath, const char *newpath);
-    char *realpath(const char *path, char *resolved_path);
-]]
+-- Note: struct dirent layout differs between macOS and Linux
+if is_macos then
+    ffi.cdef[[
+        typedef unsigned int mode_t;
+        typedef struct DIR DIR;
+        struct dirent {
+            unsigned long long d_ino;
+            unsigned long long d_seekoff;
+            unsigned short d_reclen;
+            unsigned short d_namlen;
+            unsigned char  d_type;
+            char           d_name[1024];
+        };
+        DIR *opendir(const char *name);
+        struct dirent *readdir(DIR *dirp);
+        int closedir(DIR *dirp);
+        int mkdir(const char *path, mode_t mode);
+        int access(const char *path, int mode);
+        char *getcwd(char *buf, size_t size);
+        int unlink(const char *path);
+        int rmdir(const char *path);
+        int rename(const char *oldpath, const char *newpath);
+        char *realpath(const char *path, char *resolved_path);
+    ]]
+else
+    -- Linux struct dirent
+    ffi.cdef[[
+        typedef unsigned int mode_t;
+        typedef struct DIR DIR;
+        struct dirent {
+            unsigned long  d_ino;
+            unsigned long  d_off;
+            unsigned short d_reclen;
+            unsigned char  d_type;
+            char           d_name[256];
+        };
+        DIR *opendir(const char *name);
+        struct dirent *readdir(DIR *dirp);
+        int closedir(DIR *dirp);
+        int mkdir(const char *path, mode_t mode);
+        int access(const char *path, int mode);
+        char *getcwd(char *buf, size_t size);
+        int unlink(const char *path);
+        int rmdir(const char *path);
+        int rename(const char *oldpath, const char *newpath);
+        char *realpath(const char *path, char *resolved_path);
+    ]]
+end
 
 local C = ffi.C
 
